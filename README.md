@@ -250,11 +250,14 @@ the shim tracks statements it has seen to make `commit()` with no open
 transaction a no-op and to emulate autocommit-off (implicit `BEGIN`
 before the next data statement).
 
-**Important ePHPm caveat (from the bridge's own docs):** the bridge
-session — and therefore any transaction left open — lives for the
-**worker thread, not the request**. There is no request-end rollback.
-Always `COMMIT` or `ROLLBACK` before your request ends; an unfinished
-transaction stays open on that thread until its next `ephpm_db_*` call.
+**Abandoned transactions roll back at request end.** The bridge
+session lives for the worker thread, but transactions do not: if a
+script leaves an explicit transaction open when the request finishes
+(forgotten `COMMIT`, or a mid-transaction fatal), ePHPm's per-request
+teardown issues a server-side `ROLLBACK` and logs a warning — the open
+transaction cannot leak into the next request on the same thread. This
+is a safety net, not an API: scripts should still `COMMIT` or
+`ROLLBACK` explicitly.
 
 ## Testing without ePHPm
 
