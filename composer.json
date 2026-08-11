@@ -1,0 +1,38 @@
+{
+    "name": "ephpm/mysqli-shim",
+    "description": "Userland mysqli compatibility shim over ePHPm's in-process DB bridge (ephpm_db_* SAPI functions) — global mysqli surface activates only when ext-mysqli is absent; the namespaced API works everywhere.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["mysqli", "mysql", "ephpm", "sqlite", "litewire", "sapi", "shim", "polyfill", "compatibility"],
+    "homepage": "https://ephpm.dev",
+    "support": {
+        "issues": "https://github.com/ephpm/mysqli-shim/issues",
+        "source": "https://github.com/ephpm/mysqli-shim"
+    },
+    "require": {
+        "php": "^8.2"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5 || ^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Ephpm\\Mysqli\\": "src/"
+        },
+        "files": [
+            "src/compat/mysqli.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Ephpm\\Mysqli\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "minimum-stability": "stable"
+}
