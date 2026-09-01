@@ -57,9 +57,10 @@ $row = $stmt->get_result()->fetch_assoc();
 ## Requirements
 
 - **PHP 8.2+**
-- **ePHPm built from current `main`** — the `ephpm_db_*` bridge merged
-  in [ephpm#257](https://github.com/ephpm/ephpm/pull/257) and is **not
-  in any tagged release yet**.
+- **ePHPm v0.6.3 or newer** (current release: v0.8.6) — the
+  `ephpm_db_*` bridge merged in
+  [ephpm#257](https://github.com/ephpm/ephpm/pull/257) and first shipped
+  in the v0.6.3 release.
 - **`[db.sqlite]` active** in your ePHPm config. The bridge only
   registers when an embedded SQLite backend is running; without it the
   natives throw `ephpm_db: no embedded database is active`.
@@ -74,8 +75,14 @@ var_dump(function_exists('ephpm_db_query'));   // true  → bridge available
 
 ## Install
 
+ePHPm packages are distributed via their GitHub repositories, not
+Packagist. Add this repo as a Composer `vcs` repository, then require
+the package (`ephpm/mysqli-shim` is tagged `v0.1.0`, so `^0.1`
+resolves):
+
 ```bash
-composer require ephpm/mysqli-shim
+composer config repositories.ephpm/mysqli-shim vcs https://github.com/ephpm/mysqli-shim
+composer require ephpm/mysqli-shim:^0.1
 ```
 
 `src/compat/mysqli.php` (the guarded global surface) is loaded through
