@@ -41,7 +41,7 @@ final class SqliteDbOps implements DbOpsInterface
 
     public function query(string $sql, array $params = []): array
     {
-        $result = $this->run($sql, $params);
+        $result = $this->exec($sql, $params);
         if ($result === null || $result->numColumns() === 0) {
             return [];
         }
@@ -56,7 +56,7 @@ final class SqliteDbOps implements DbOpsInterface
 
     public function execute(string $sql, array $params = []): array
     {
-        $result = $this->run($sql, $params);
+        $result = $this->exec($sql, $params);
         if ($result === null || $result->numColumns() > 0) {
             // Dialect no-op, or a SELECT routed through execute: zeros,
             // matching the real bridge's documented behavior.
@@ -70,10 +70,70 @@ final class SqliteDbOps implements DbOpsInterface
         ];
     }
 
+    public function run(string $sql, array $params = []): array
+    {
+        $result = $this->exec($sql, $params);
+
+        // Dialect no-op (SET ...): an OK outcome with no metadata.
+        if ($result === null) {
+            return [
+                'has_rowset' => false,
+                'rows' => [],
+                'columns' => [],
+                'affected_rows' => 0,
+                'last_insert_id' => 0,
+            ];
+        }
+
+        $ncols = $result->numColumns();
+        if ($ncols === 0) {
+            $result->finalize();
+
+            return [
+                'has_rowset' => false,
+                'rows' => [],
+                'columns' => [],
+                'affected_rows' => $this->db->changes(),
+                'last_insert_id' => $this->db->lastInsertRowID(),
+            ];
+        }
+
+        // Column names are read from the statement before fetching, so they
+        // are present even when the result set matched zero rows (issue #262).
+        $columns = [];
+        for ($c = 0; $c < $ncols; $c++) {
+            $columns[] = ['name' => $result->columnName($c), 'type' => null];
+        }
+
+        $rows = [];
+        while (($row = $result->fetchArray(\SQLITE3_ASSOC)) !== false) {
+            $rows[] = $row;
+        }
+        $result->finalize();
+
+        return [
+            'has_rowset' => true,
+            'rows' => $rows,
+            'columns' => $columns,
+            'affected_rows' => 0,
+            'last_insert_id' => 0,
+        ];
+    }
+
+    /**
+     * Not emulated by this test backend: returning null keeps the shim on
+     * its own keyword-based transaction tracking (the real SapiDbOps answers
+     * from `ephpm_db_in_transaction()` when the runtime provides it).
+     */
+    public function inTransaction(): ?bool
+    {
+        return null;
+    }
+
     /**
      * @param list<null|bool|int|float|string> $params
      */
-    private function run(string $sql, array $params): ?\SQLite3Result
+    private function exec(string $sql, array $params): ?\SQLite3Result
     {
         if (\preg_match('/^\s*SET\s/i', $sql) === 1) {
             return null; // dialect no-op (SET NAMES, SET sql_mode, ...)

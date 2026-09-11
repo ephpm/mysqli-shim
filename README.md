@@ -57,7 +57,7 @@ $row = $stmt->get_result()->fetch_assoc();
 ## Requirements
 
 - **PHP 8.2+**
-- **ePHPm v0.6.3 or newer** (current release: v0.8.6) — the
+- **ePHPm v0.6.3 or newer** (current release: v0.10.2) — the
   `ephpm_db_*` bridge merged in
   [ephpm#257](https://github.com/ephpm/ephpm/pull/257) and first shipped
   in the v0.6.3 release.
@@ -136,21 +136,21 @@ real driver, not this shim.
 
 ## Statement routing
 
-The bridge exposes two entry points with different return shapes:
-`ephpm_db_query()` (rows, no OK metadata) and `ephpm_db_execute()`
-(affected_rows / last_insert_id, no rows). `mysqli_query()` is one
-entry point, so the shim routes by the first significant keyword
-(comments and leading parentheses skipped):
+`mysqli_query()` is one entry point; the shim runs every statement through
+the bridge's unified `ephpm_db_run()`, which executes once and reports
+`has_rowset` (read from the executed statement), the rows, the column
+metadata, and the affected-rows / last-insert-id metadata. There is **no
+first-keyword classification**: a `WITH … INSERT` hybrid, `INSERT …
+RETURNING`, and `CALL` all classify correctly for free, and a rowset with
+zero rows still carries its column names.
 
-- `SELECT`, `SHOW`, `DESCRIBE`, `DESC`, `EXPLAIN`, `WITH`, `VALUES`,
-  `TABLE`, or any statement containing a `RETURNING` clause →
-  `ephpm_db_query()` → returns a `mysqli_result` (possibly zero-row)
-- everything else → `ephpm_db_execute()` → returns true, sets
-  `affected_rows` / `insert_id`
+On an ePHPm too old to have `ephpm_db_run()` the backend transparently
+falls back to the previous `ephpm_db_query()` / `ephpm_db_execute()` split
+(routing by first keyword, with `ephpm_db_columns()` filling in zero-row
+column names when present), preserving the v0.6.3 minimum.
 
-Consequences: a `WITH … INSERT` hybrid is routed to the query side and
-loses its affected-row count; after a rowset statement `insert_id` is 0
-and `affected_rows` equals `num_rows` (the mysqlnd buffered behavior).
+After a rowset statement `insert_id` is 0 and `affected_rows` equals
+`num_rows` (the mysqlnd buffered behavior).
 
 ## Coverage matrix
 
@@ -165,7 +165,7 @@ does nothing, returns success · **throws** = not implemented, throws
 | `__construct` / `connect` / `real_connect` | **no-op** — all connection args accepted and ignored |
 | `query` (returns `mysqli_result`\|bool), `real_query` + `store_result` / `use_result` | **impl** (all results buffered; `$result_mode` ignored) |
 | `prepare` | **impl** — but no server-side validation; errors surface at execute |
-| `real_escape_string` / `escape_string` | **impl** — backslash-escapes NUL, `\n`, `\r`, `\`, `'`, `"`, Ctrl-Z |
+| `real_escape_string` / `escape_string` | **impl** — backslash-escapes NUL, `\n`, `\r`, `\`, `"`, Ctrl-Z; the single quote is **doubled** (`''`), which litewire accepts where it rejects `\'` (db-wordpress #1) |
 | `errno`, `error`, `error_list`, `sqlstate`, `insert_id`, `affected_rows`, `field_count` | **impl** |
 | `autocommit`, `begin_transaction`, `commit`, `rollback` | **impl** — as SQL through the bridge; see [Transactions](#transactions) |
 | `savepoint`, `release_savepoint` | pass-through SQL — support depends on the backend |
@@ -227,10 +227,6 @@ extension doesn't define it) and so are `MYSQLI_NO_DATA` /
 
 Honest list of where the shim differs from real mysqli:
 
-- **Zero-row rowsets lose column metadata.** `ephpm_db_query()` returns
-  rows only, so a SELECT with no rows yields a `Result` with
-  `num_rows === 0` **and `field_count === 0`** — the real mysqli knows
-  the columns. Field names/types are derived from the first row.
 - **Field metadata is inferred, not declared.** `fetch_field()` reports
   `name`/`orgname` correctly; `type` is guessed from PHP value types
   (int → `LONGLONG`, float → `DOUBLE`, string → `VAR_STRING`, all-null →

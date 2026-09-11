@@ -77,6 +77,59 @@ final class TransactionTest extends ShimTestCase
         self::assertSame(2, $this->countPeople());
     }
 
+    public function testBridgeInTransactionStateIsAuthoritativeWhenAvailable(): void
+    {
+        // A backend that answers inTransaction() (as SapiDbOps does from the
+        // native ephpm_db_in_transaction()) overrides the shim's keyword
+        // tracking. Here the bridge insists it is NOT in a transaction even
+        // after a raw BEGIN, so commit() must treat it as a no-op and send no
+        // COMMIT — the opposite of what keyword tracking alone would do.
+        $ops = new class(new \Ephpm\Mysqli\SqliteDbOps()) implements \Ephpm\Mysqli\DbOpsInterface {
+            /** @var list<string> */
+            public array $recorded = [];
+
+            public ?bool $bridgeInTx = false;
+
+            public function __construct(private readonly \Ephpm\Mysqli\DbOpsInterface $inner)
+            {
+            }
+
+            public function query(string $sql, array $params = []): array
+            {
+                $this->recorded[] = $sql;
+
+                return $this->inner->query($sql, $params);
+            }
+
+            public function execute(string $sql, array $params = []): array
+            {
+                $this->recorded[] = $sql;
+
+                return $this->inner->execute($sql, $params);
+            }
+
+            public function run(string $sql, array $params = []): array
+            {
+                $this->recorded[] = $sql;
+
+                return $this->inner->run($sql, $params);
+            }
+
+            public function inTransaction(): ?bool
+            {
+                return $this->bridgeInTx;
+            }
+        };
+
+        $db = new \Ephpm\Mysqli\Connection(ops: $ops);
+        $this->createPeopleTable($db);
+
+        self::assertTrue($db->query('BEGIN'));
+        // Authoritative state is false, so commit() is a no-op and emits no SQL.
+        self::assertTrue($db->commit());
+        self::assertNotContains('COMMIT', $ops->recorded);
+    }
+
     public function testSavepointsPassThroughAsSql(): void
     {
         // SQLite (like MySQL) supports SAVEPOINT / ROLLBACK TO.

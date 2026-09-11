@@ -138,7 +138,8 @@ final class CompatSurfaceTest extends TestCase
         self::assertFalse($report['off_mode_result']);
         self::assertSame(1146, $report['off_mode_errno']);
         self::assertSame('42S02', $report['off_mode_sqlstate']);
-        self::assertSame("O\\'Brien\\n", $report['escape']);
+        // Single quote doubled ('') not backslash-escaped; \n still escaped.
+        self::assertSame("O''Brien\\n", $report['escape']);
         self::assertTrue($report['close']);
         self::assertTrue($report['double_include_ok']);
     }

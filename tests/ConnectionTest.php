@@ -58,7 +58,14 @@ final class ConnectionTest extends ShimTestCase
         $result = $this->db->query('SELECT * FROM people');
         self::assertInstanceOf(Result::class, $result);
         self::assertSame(0, $result->num_rows);
-        self::assertSame(0, $result->field_count, 'bridge fidelity limit: zero-row rowsets lose column metadata');
+        // Column metadata now comes from the executed statement
+        // (ephpm_db_run(), issue #262), so a zero-row rowset still reports
+        // its five columns (id, name, age, score, email).
+        self::assertSame(5, $result->field_count);
+        self::assertSame(
+            ['id', 'name', 'age', 'score', 'email'],
+            \array_column($result->fetch_fields(), 'name'),
+        );
     }
 
     public function testUpdateAndDeleteReportAffectedRows(): void
@@ -86,7 +93,9 @@ final class ConnectionTest extends ShimTestCase
     public function testEscaping(): void
     {
         $db = $this->db;
-        self::assertSame("\\'", $db->real_escape_string("'"));
+        // Single quote is DOUBLED ('') — litewire's tenant parser rejects a
+        // backslash-escaped `\'` as malformed SQL (db-wordpress issue #1).
+        self::assertSame("''", $db->real_escape_string("'"));
         self::assertSame('\\"', $db->real_escape_string('"'));
         self::assertSame('\\\\', $db->real_escape_string('\\'));
         self::assertSame('\\n', $db->real_escape_string("\n"));
@@ -94,10 +103,27 @@ final class ConnectionTest extends ShimTestCase
         self::assertSame('\\0', $db->real_escape_string("\0"));
         self::assertSame('\\Z', $db->real_escape_string("\x1a"));
         self::assertSame(
-            "O\\'Brien said \\\"hi\\\"",
+            "O''Brien said \\\"hi\\\"",
             $db->escape_string('O\'Brien said "hi"')
         );
         self::assertSame('plain text', $db->real_escape_string('plain text'));
+    }
+
+    public function testEscapedApostropheRoundTripsThroughAQuotedLiteral(): void
+    {
+        // The doubled single quote ('') is valid in BOTH the MySQL dialect
+        // litewire parses and raw SQLite, so it survives being embedded in a
+        // quoted literal and read back — the concrete win of doubling over
+        // the old `\'`, which litewire would have rejected as malformed SQL.
+        // (Backslash escapes are MySQL-only and are decoded by litewire, not
+        // by the raw-SQLite test backend, so they are not round-tripped here.)
+        $this->createPeopleTable($this->db);
+        $escaped = $this->db->real_escape_string("O'Brien");
+        self::assertSame("O''Brien", $escaped);
+
+        self::assertTrue($this->db->query("INSERT INTO people (name) VALUES ('{$escaped}')"));
+        $row = $this->db->query('SELECT name FROM people')->fetch_assoc();
+        self::assertSame("O'Brien", $row['name']);
     }
 
     public function testServerIdentity(): void

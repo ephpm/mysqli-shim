@@ -15,8 +15,10 @@ namespace Ephpm\Mysqli;
  * inferred from the PHP value types in the rowset (int → LONGLONG,
  * float → DOUBLE, string → VAR_STRING, all-null → NULL); `table`,
  * `orgtable`, `db`, and `length` are unknown and reported empty/zero.
- * A zero-row rowset has no column names at all (`field_count` is 0) —
- * see the README.
+ * When the column names are supplied (from `ephpm_db_run()`'s metadata,
+ * ePHPm issue #262) a zero-row rowset still reports its `field_count` and
+ * field names; the type inference simply has no values to work from and
+ * reports NULL.
  *
  * @property-read int $num_rows
  * @property-read int $field_count
@@ -38,9 +40,15 @@ class Result implements \IteratorAggregate
 
     /**
      * @param list<array<string, int|float|string|null>> $rows
+     * @param list<string>|null                          $columnNames column
+     *        names in SELECT-list order from the executed statement, carried
+     *        even when $rows is empty (ePHPm issue #262). When null, the
+     *        names are derived from the first row (empty for a zero-row set).
      */
-    public function __construct(private array $rows)
-    {
+    public function __construct(
+        private array $rows,
+        private ?array $columnNames = null,
+    ) {
     }
 
     // ── Row fetching ───────────────────────────────────────────────────
@@ -259,12 +267,16 @@ class Result implements \IteratorAggregate
 
     private function fieldCount(): int
     {
-        return $this->rows === [] ? 0 : \count($this->rows[0]);
+        return \count($this->columnNames());
     }
 
     /** @return list<string> */
     private function columnNames(): array
     {
+        if ($this->columnNames !== null) {
+            return $this->columnNames;
+        }
+
         return $this->rows === [] ? [] : \array_map(\strval(...), \array_keys($this->rows[0]));
     }
 

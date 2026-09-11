@@ -52,4 +52,32 @@ interface DbOpsInterface
      * @throws \Exception code = MySQL errno, message `SQLSTATE[xxxxx]: …`
      */
     public function execute(string $sql, array $params = []): array;
+
+    /**
+     * Execute SQL once and report what it actually did — the unified entry
+     * point mirroring the native `ephpm_db_run()` (ePHPm issue #263).
+     *
+     * `has_rowset` is read from the executed statement, so routing between
+     * a rowset and OK metadata is never guessed from the first keyword.
+     * `columns` carries the column metadata (name + declared type) even for
+     * a zero-row result set (ePHPm issue #262), so `mysqli_result` field
+     * metadata works with no rows. `rows` is empty for an OK outcome;
+     * `affected_rows`/`last_insert_id` are zero for a result set.
+     *
+     * @param list<null|bool|int|float|string> $params
+     *
+     * @return array{has_rowset: bool, rows: list<array<string, int|float|string|null>>, columns: list<array{name: string, type: ?string}>, affected_rows: int, last_insert_id: int}
+     *
+     * @throws \Exception code = MySQL errno, message `SQLSTATE[xxxxx]: …`
+     */
+    public function run(string $sql, array $params = []): array;
+
+    /**
+     * Whether this thread's bridge session is inside an explicit
+     * transaction, from the authoritative native `ephpm_db_in_transaction()`
+     * (ePHPm issue #260), or `null` when the backend cannot answer
+     * (an older ePHPm, or a test backend that does not emulate it) — in
+     * which case the caller keeps its own keyword-based tracking.
+     */
+    public function inTransaction(): ?bool;
 }
