@@ -39,6 +39,9 @@ class Statement
     /** @var list<array<string, int|float|string|null>>|null rowset from the last execute, null if none */
     private ?array $rows = null;
 
+    /** @var list<string> column names of the last rowset, in select order (issue #262) */
+    private array $columnNames = [];
+
     private bool $resultConsumed = false;
 
     private int $cursor = 0;
@@ -128,6 +131,7 @@ class Statement
         $this->resetErrorState();
         $this->conn->resetErrorState();
         $this->rows = null;
+        $this->columnNames = [];
         $this->resultConsumed = false;
         $this->cursor = 0;
 
@@ -154,16 +158,20 @@ class Statement
         }
 
         try {
-            if (SqlHelper::producesRowset($this->sql)) {
-                $this->rows = $this->conn->runQuery($this->sql, $bound);
+            // Unified entry point: has_rowset is read from the executed
+            // statement, so no first-keyword classification (issue #263), and
+            // the column names survive a zero-row result (issue #262).
+            $result = $this->conn->runBridge($this->sql, $bound);
+            if ($result['has_rowset']) {
+                $this->rows = $result['rows'];
+                $this->columnNames = \array_column($result['columns'], 'name');
                 // Buffered rowset: affected_rows mirrors num_rows, like
                 // mysqlnd after store_result. insert_id resets to 0.
                 $this->affectedRows = \count($this->rows);
                 $this->insertId = 0;
             } else {
-                $ok = $this->conn->runExec($this->sql, $bound);
-                $this->affectedRows = $ok['affected_rows'];
-                $this->insertId = $ok['last_insert_id'];
+                $this->affectedRows = $result['affected_rows'];
+                $this->insertId = $result['last_insert_id'];
             }
         } catch (SqlException $e) {
             $this->recordError($e);
@@ -189,7 +197,7 @@ class Statement
         }
         $this->resultConsumed = true;
 
-        return new Result($this->rows);
+        return new Result($this->rows, $this->columnNames);
     }
 
     /**
@@ -304,11 +312,13 @@ class Statement
 
     private function fieldCountValue(): int
     {
-        if ($this->rows === null || $this->rows === []) {
+        // Column count comes from the executed statement's metadata, so a
+        // zero-row rowset still reports its field count (issue #262).
+        if ($this->rows === null) {
             return 0;
         }
 
-        return \count($this->rows[0]);
+        return \count($this->columnNames);
     }
 
     private function resetErrorState(): void

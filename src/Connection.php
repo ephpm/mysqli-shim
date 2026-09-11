@@ -238,8 +238,15 @@ class Connection
     // ── Escaping ───────────────────────────────────────────────────────
 
     /**
-     * mysql_real_escape_string() semantics: backslash-escape NUL, \n,
-     * \r, backslash, single quote, double quote, and Ctrl-Z.
+     * MySQL-style string escaping: backslash-escape NUL, `\n`, `\r`,
+     * backslash, double quote, and Ctrl-Z.
+     *
+     * The **single quote is doubled (`''`), not backslash-escaped (`\'`)**.
+     * litewire's tenant-path parser rejects a backslash-escaped single
+     * quote as malformed SQL (`'O\'Brien'` fails), whereas `''` is accepted
+     * by both MySQL and SQLite/Turso. Doubling stays unambiguous because
+     * backslashes are still doubled, so a string can never be broken out of.
+     * See github.com/ephpm/db-wordpress issue #1.
      */
     public function real_escape_string(string $string): string
     {
@@ -248,7 +255,7 @@ class Connection
             "\n" => '\n',
             "\r" => '\r',
             '\\' => '\\\\',
-            "'" => "\\'",
+            "'" => "''",
             '"' => '\"',
             "\x1a" => '\Z',
         ]);
@@ -277,24 +284,28 @@ class Connection
         $this->resetErrorState();
 
         try {
-            if (SqlHelper::producesRowset($query)) {
-                $rows = $this->runQuery($query, []);
-                $this->affectedRows = \count($rows);
-                $this->insertId = 0;
-                $this->fieldCount = $rows === [] ? 0 : \count($rows[0]);
-
-                return new Result($rows);
-            }
-
-            $ok = $this->runExec($query, []);
-            $this->affectedRows = $ok['affected_rows'];
-            $this->insertId = $ok['last_insert_id'];
-            $this->fieldCount = 0;
-
-            return true;
+            $result = $this->runBridge($query, []);
         } catch (SqlException $e) {
             return $this->handleError($e);
         }
+
+        if ($result['has_rowset']) {
+            $rows = $result['rows'];
+            $names = \array_column($result['columns'], 'name');
+            $this->affectedRows = \count($rows);
+            $this->insertId = 0;
+            // Column count comes from the executed statement's metadata, so
+            // a zero-row rowset still reports its columns (issue #262).
+            $this->fieldCount = \count($names);
+
+            return new Result($rows, $names);
+        }
+
+        $this->affectedRows = $result['affected_rows'];
+        $this->insertId = $result['last_insert_id'];
+        $this->fieldCount = 0;
+
+        return true;
     }
 
     /**
@@ -569,6 +580,37 @@ class Connection
     }
 
     /**
+     * Run a statement through the bridge's unified entry point
+     * (`ephpm_db_run()`) and report what it actually did — rows + column
+     * metadata + OK metadata. `has_rowset` is read from the executed
+     * statement, so routing is no longer guessed from the first keyword, and
+     * a zero-row result set still carries its column names (issues #262,
+     * #263). Applies the same autocommit BEGIN and transaction tracking as
+     * {@see runQuery()} / {@see runExec()}.
+     *
+     * @internal used by {@see Statement} and {@see self::query()}
+     *
+     * @param list<null|bool|int|float|string> $params
+     *
+     * @return array{has_rowset: bool, rows: list<array<string, int|float|string|null>>, columns: list<array{name: string, type: ?string}>, affected_rows: int, last_insert_id: int}
+     *
+     * @throws SqlException
+     */
+    public function runBridge(string $sql, array $params): array
+    {
+        $this->beforeStatement($sql);
+
+        try {
+            $result = $this->ops->run($sql, $params);
+        } catch (\Exception $e) {
+            throw $this->recordError($e);
+        }
+        $this->trackTransaction($sql);
+
+        return $result;
+    }
+
+    /**
      * Apply the current report mode to an error: throw under STRICT,
      * warn and return false under ERROR alone, silently return false
      * otherwise. Error state has already been recorded on the object.
@@ -647,6 +689,16 @@ class Connection
 
     private function trackTransaction(string $sql): void
     {
+        // Prefer the bridge's authoritative transaction state
+        // (ephpm_db_in_transaction(), issue #260) when the backend can
+        // answer; otherwise fall back to keyword-based tracking.
+        $authoritative = $this->ops->inTransaction();
+        if ($authoritative !== null) {
+            $this->inTransaction = $authoritative;
+
+            return;
+        }
+
         match (SqlHelper::txnEffect($sql)) {
             1 => $this->inTransaction = true,
             -1 => $this->inTransaction = false,
