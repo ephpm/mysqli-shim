@@ -57,7 +57,7 @@ $row = $stmt->get_result()->fetch_assoc();
 ## Requirements
 
 - **PHP 8.2+**
-- **ePHPm v0.6.3 or newer** (current release: v0.10.2) — the
+- **ePHPm v0.6.3 or newer** (see the [ePHPm releases](https://github.com/ephpm/ephpm/releases) for the latest version) — the
   `ephpm_db_*` bridge merged in
   [ephpm#257](https://github.com/ephpm/ephpm/pull/257) and first shipped
   in the v0.6.3 release.
